@@ -89,7 +89,11 @@ export class UploadEngine {
   }
 
   private publish() {
-    this.snapshot = [...this.reports.values()].sort((a, b) => b.createdAt - a.createdAt);
+    // Copy-on-publish: the worker mutates its own Report objects in place, so UI consumers get
+    // fresh copies. Otherwise memoized rows see the same reference and never re-render.
+    this.snapshot = [...this.reports.values()]
+      .map(r => ({...r, images: r.images.map(i => ({...i})), lastError: r.lastError && {...r.lastError}}))
+      .sort((a, b) => b.createdAt - a.createdAt);
     this.listeners.forEach(l => l());
   }
 

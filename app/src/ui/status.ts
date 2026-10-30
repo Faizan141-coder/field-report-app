@@ -60,8 +60,11 @@ export function summarize(reports: readonly Report[], online: boolean): Summary 
       ? {tone: 'busy', title: `Uploading ${n} report${n > 1 ? 's' : ''}`, detail: 'Safe on this device until the server confirms.'}
       : {tone: 'wait', title: 'Waiting to upload', detail: `${saved}.`};
   }
-  if (!online) return {tone: 'idle', title: 'Offline', detail: 'Nothing waiting to upload.'};
-  return {tone: 'ok', title: 'All reports uploaded', detail: reports.length ? 'Everything is on the server.' : 'No reports yet.'};
+  if (!reports.length) {
+    return {tone: 'idle', title: 'No reports yet', detail: online ? 'Nothing waiting to upload.' : 'Offline. Nothing waiting to upload.'};
+  }
+  if (!online) return {tone: 'idle', title: 'Offline', detail: 'Everything you saved is already uploaded.'};
+  return {tone: 'ok', title: 'All reports uploaded', detail: 'Everything is on the server.'};
 }
 
 function time(ms?: number) {

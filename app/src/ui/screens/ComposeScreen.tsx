@@ -3,6 +3,7 @@ import {
   ActivityIndicator, AppState, Image, KeyboardAvoidingView, Pressable,
   ScrollView, StyleSheet, Text, TextInput, View,
 } from 'react-native';
+import {useHeaderHeight} from '@react-navigation/elements';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import {engine} from '../../app/engine';
 import {MAX_IMAGES} from '../../core/types';
@@ -13,10 +14,12 @@ type Notice = {kind: 'permission'; what: 'camera' | 'photos'} | {kind: 'error'; 
 
 export function ComposeScreen({navigation}: {navigation: {goBack: () => void}}) {
   const insets = useSafeAreaInsets();
+  const headerHeight = useHeaderHeight();
   const [description, setDescription] = useState('');
   const [photos, setPhotos] = useState<string[]>([]);
   const [notice, setNotice] = useState<Notice>(null);
   const [saving, setSaving] = useState(false);
+  const [picking, setPicking] = useState(false);
 
   // Coming back from Settings: drop the stale permission notice so the buttons are tried again.
   useEffect(() => {
@@ -25,7 +28,8 @@ export function ComposeScreen({navigation}: {navigation: {goBack: () => void}}) 
   }, []);
 
   const full = photos.length >= MAX_IMAGES;
-  const canSave = description.trim().length > 0 && photos.length >= 1 && !saving;
+  const busy = saving || picking;
+  const canSave = description.trim().length > 0 && photos.length >= 1 && !busy;
 
   const handle = (r: PickResult) => {
     if (r.ok) {
@@ -33,6 +37,16 @@ export function ComposeScreen({navigation}: {navigation: {goBack: () => void}}) 
       setPhotos(p => [...p, ...r.uris].slice(0, MAX_IMAGES));
     } else if (r.reason === 'permission') setNotice({kind: 'permission', what: r.what});
     else if (r.reason === 'error') setNotice({kind: 'error', message: r.message});
+  };
+
+  // The picker only returns once large originals are copied, which can take seconds.
+  const pick = async (run: () => Promise<PickResult>) => {
+    setPicking(true);
+    try {
+      handle(await run());
+    } finally {
+      setPicking(false);
+    }
   };
 
   const save = async () => {
@@ -51,7 +65,7 @@ export function ComposeScreen({navigation}: {navigation: {goBack: () => void}}) 
   const hint = !description.trim() ? 'Add a short description' : photos.length < 1 ? 'Add at least one photo' : null;
 
   return (
-    <KeyboardAvoidingView style={styles.flex} behavior="padding">
+    <KeyboardAvoidingView style={styles.flex} behavior="padding" keyboardVerticalOffset={headerHeight}>
       <ScrollView style={styles.flex} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
         <Text style={styles.label}>What did you find?</Text>
         <TextInput
@@ -84,13 +98,19 @@ export function ComposeScreen({navigation}: {navigation: {goBack: () => void}}) 
         </View>
 
         <View style={styles.row}>
-          <Pressable accessibilityRole="button" disabled={full || saving} onPress={async () => handle(await takePhoto())} style={[styles.pick, (full || saving) && styles.off]}>
+          <Pressable accessibilityRole="button" disabled={full || busy} onPress={() => pick(takePhoto)} style={[styles.pick, (full || busy) && styles.off]}>
             <Text style={styles.pickText}>Take photo</Text>
           </Pressable>
-          <Pressable accessibilityRole="button" disabled={full || saving} onPress={async () => handle(await pickFromGallery(MAX_IMAGES - photos.length))} style={[styles.pick, (full || saving) && styles.off]}>
+          <Pressable accessibilityRole="button" disabled={full || busy} onPress={() => pick(() => pickFromGallery(MAX_IMAGES - photos.length))} style={[styles.pick, (full || busy) && styles.off]}>
             <Text style={styles.pickText}>From gallery</Text>
           </Pressable>
         </View>
+        {picking ? (
+          <View style={styles.picking}>
+            <ActivityIndicator />
+            <Text style={styles.note}>Adding photos… large originals can take a few seconds.</Text>
+          </View>
+        ) : null}
         {full ? <Text style={styles.note}>That's the maximum of {MAX_IMAGES} photos. Remove one to add another.</Text> : null}
 
         {notice?.kind === 'permission' ? (
@@ -135,6 +155,7 @@ const styles = StyleSheet.create({
   pickText: {color: colors.primary, fontSize: 16, fontWeight: '600'},
   off: {opacity: 0.4},
   note: {fontSize: 13, color: colors.muted},
+  picking: {flexDirection: 'row', alignItems: 'center', gap: 10},
   warn: {backgroundColor: colors.waitBg, borderRadius: 10, padding: 12, gap: 8},
   warnText: {color: colors.text, fontSize: 14},
   warnBtn: {minHeight: HIT, borderRadius: 10, borderWidth: 1, borderColor: colors.wait, alignItems: 'center', justifyContent: 'center'},
