@@ -18,7 +18,9 @@ cd server && npm install && npm start          # http://localhost:4000, data in 
 # 2. app (terminal 2)
 cd app && npm install
 adb reverse tcp:4000 tcp:4000                  # lets the phone reach the server as "localhost"
-npx react-native run-android
+npx react-native run-android                   # debug (needs Metro)
+# or a standalone build that needs no Metro, best for kill/airplane-mode tests:
+npx react-native run-android --mode release
 ```
 
 The server URL is one constant: `app/src/native/config.ts`.
@@ -98,6 +100,34 @@ Originals (an 18 MB camera file is fine) are decoded, scaled and re-encoded **na
 - **One JSON file per report**, atomic write (tmp → unlink → move; a crash in the gap is repaired on load). Chosen over SQLite: a handful of small records, no native dependency, and one corrupt file can't take others down.
 - **Own backend** rather than S3/Firebase, because resumable chunks, a commit step that refuses incomplete reports, and fault injection were easier to get right than to bolt onto a vendor SDK.
 
+## What has been verified, and how
+
+| claim | evidence |
+|---|---|
+| exactly-once, byte-identical delivery through lost acks, dropped sockets, mid-body drops, 500s, hangs and a simulated force-quit | `npm run headless` (real engine, real server, MD5 of every image) |
+| offline holds, reconnect delivers; a 400 is not retried | `npm run headless` |
+| a report composed offline with 5 photos (one 18.3 MB original) survives force-quit, reinstall and two emulator reboots, then uploads unattended exactly once | run by hand on an Android 15 arm64 emulator, **release** build. The server held 5 valid 2048×1536 JPEGs of ~1.4 MB each |
+| nothing says "Uploaded" before the server commits | wording lives in one pure function, `app/src/ui/status.ts` |
+
 ## Not done / known gaps
 
-*(to be completed after verification)*
+Said plainly, in rough order of how much I'd worry:
+
+- **No background execution on Android.** Uploads run while the app process is alive. If the OS freezes or kills a backgrounded app, nothing uploads until it is opened again (it then resumes where it stopped; nothing is lost, but nothing is delivered either). The real fix is a foreground service or WorkManager job; I did not add one because it needs native code and a notification permission flow I couldn't test properly in the time.
+- **On-device fault runs are thin.** The fault matrix above was exercised headlessly, not by hand on the emulator with a throttled link and repeated force-quits mid-chunk. The emulator on my machine was too slow to do that reliably (it stalled for minutes at a time under load). The engine code path is identical, but the adapters (`httpApi.ts`, `fileStore.ts`) were only exercised by the one end-to-end run above.
+- **Permission-refusal and "sixth photo / zero photos / blank description" flows** are implemented (see `ComposeScreen.tsx`) but I only observed the zero-photo and blank-description gating on the device. The permission notice was not triggered: Android's system camera/photo-picker intents need no runtime permission, so it cannot be refused there. The camera path itself was not exercised (the emulator's virtual camera scene was not driven).
+- **A report in progress while composing is not persisted.** Force-quit before pressing Save and the draft is gone. Saved reports are safe; unsaved drafts are not.
+- **"Uploading 0 of 5" covers the preparing step too.** Resizing a large original takes a moment and the UI doesn't distinguish it from sending.
+- **Thumbnails of uploaded reports.** The local row shows a placeholder once the report is uploaded (the local files are deleted after commit); the *On the server* tab shows the real images fetched from the server.
+- **Dev transport only.** The app talks plain HTTP to `localhost` over `adb reverse`; the network security config allows cleartext to `localhost`, `127.0.0.1` and `10.0.2.2` only. A real deployment needs HTTPS and an authenticated backend. There is no login by design.
+- **Timing of the stall watchdog (30 s) and chunk size (64 KB) are educated guesses**, not tuned against a real 2G link.
+- **iOS:** the project exists and usage strings are set, but it was never built or run.
+- **No unit-test suite** beyond the headless scenarios; I preferred verifying the delivery guarantees end to end.
+
+## With another day
+
+1. Android foreground service / WorkManager so uploads continue with the app backgrounded.
+2. Persist the compose draft.
+3. A distinct "Preparing photos" state and per-image progress.
+4. Hand-run the full fault matrix on a physical device on a throttled network; tune chunk size and stall timeout from real numbers.
+5. Content-hash the images so the server can detect a corrupted chunk, not just a missing one.
