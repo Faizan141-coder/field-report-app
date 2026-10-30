@@ -43,6 +43,9 @@ export class UploadEngine {
   private reports = new Map<string, Report>();
   private snapshot: readonly Report[] = [];
   private listeners = new Set<Listener>();
+  private progress = new Map<string, number>();
+  private progressListeners = new Set<Listener>();
+  private lastProgressEmit = 0;
   private running = false;
   private wake: (() => void) | null = null;
   private abort = new AbortController();
@@ -67,6 +70,23 @@ export class UploadEngine {
     return () => void this.listeners.delete(l);
   };
   getSnapshot = () => this.snapshot;
+
+  /** 0..1 for the report currently uploading, otherwise undefined. Separate store: it ticks fast. */
+  subscribeProgress = (l: Listener) => {
+    this.progressListeners.add(l);
+    return () => void this.progressListeners.delete(l);
+  };
+  getProgress = (id: string) => this.progress.get(id);
+
+  private setProgress(id: string, value: number | undefined, force = false) {
+    if (value === undefined) this.progress.delete(id);
+    else this.progress.set(id, value);
+    const t = this.now();
+    if (force || t - this.lastProgressEmit > 200) {
+      this.lastProgressEmit = t;
+      this.progressListeners.forEach(l => l());
+    }
+  }
 
   private publish() {
     this.snapshot = [...this.reports.values()].sort((a, b) => b.createdAt - a.createdAt);
@@ -141,6 +161,21 @@ export class UploadEngine {
     }
     this.wake?.(); // cut short a backoff sleep
     this.kick();
+  }
+
+  /** User gives up on a report that needs attention. This is the one way unsent work is deleted. */
+  async discard(id: string): Promise<void> {
+    const r = this.reports.get(id);
+    if (!r || r.phase !== 'needsAttention') return;
+    this.reports.delete(id);
+    this.publish();
+    await this.cleanupFiles(r);
+    await this.deps.store.remove(id);
+  }
+
+  /** Forget local records of reports the server already holds. */
+  async clearUploaded(): Promise<void> {
+    for (const r of [...this.reports.values()]) if (r.phase === 'uploaded') await this.dismiss(r.id);
   }
 
   /** Drop everything local. In-flight work is aborted first. */
@@ -231,6 +266,7 @@ export class UploadEngine {
           img.preparedBytes = p.bytes;
           await this.persist(r);
         }
+        const doneCount = r.images.filter(i => i.uploaded).length;
         await withStallWatchdog(this.stallMs, signal, (sig, touch) =>
           this.deps.api.uploadImage({
             reportId: r.id,
@@ -238,10 +274,14 @@ export class UploadEngine {
             uri: img.preparedUri!,
             bytes: img.preparedBytes!,
             signal: sig,
-            onProgress: touch,
+            onProgress: sent => {
+              touch();
+              this.setProgress(r.id, (doneCount + Math.min(1, sent / img.preparedBytes!)) / r.images.length);
+            },
           }),
         );
         img.uploaded = true;
+        this.setProgress(r.id, (doneCount + 1) / r.images.length);
         await this.persist(r);
       }
       await withStallWatchdog(this.stallMs, signal, sig =>
@@ -263,6 +303,8 @@ export class UploadEngine {
     } catch (e) {
       if (signal.aborted || !this.reports.has(r.id)) return; // clearAll() ran
       await this.handleFailure(r, e);
+    } finally {
+      this.setProgress(r.id, undefined, true);
     }
   }
 
