@@ -57,7 +57,28 @@ curl -X DELETE localhost:4000/admin/faults       # clear
 
 Extra knobs: `latencyMs` (added to every write), `times` (how many requests the fault applies to; `0` = until cleared). `DELETE /admin/reset` wipes the server's data. A 413 is returned for anything declaring more than 5 MB.
 
-For a slow link use the emulator's network speed setting (Extended controls → Cellular → network type GSM/EDGE) or `latencyMs`.
+For a slow link use the emulator's network speed setting (Extended controls → Cellular → network type GSM/EDGE, or start it with `-netspeed edge -netdelay none`) or `latencyMs`.
+
+### Walkthrough: the assessment's main scenario
+
+```bash
+# backend + app as above, release build installed
+adb shell cmd connectivity airplane-mode enable      # 1. airplane mode on
+# 2. in the app: create three reports, one with five photos (use "From gallery")
+adb shell am force-stop com.fieldreport              # 3. force-quit
+adb shell am start -n com.fieldreport/.MainActivity  # 4. reopen: all three still "Saved on this device"
+
+curl -X POST localhost:4000/admin/faults -H 'content-type: application/json' \
+  -d '{"mode":"dropMidBody","times":6,"dropAfterBytes":20000}'   # 5. the link keeps dying mid-upload
+adb shell cmd connectivity airplane-mode disable     # 6. connectivity returns; no input needed
+
+curl -s localhost:4000/reports | python3 -m json.tool   # 7. each report exactly once, every image present
+curl -X DELETE localhost:4000/admin/faults
+```
+
+If the emulator doesn't regain a network after leaving airplane mode, restart it (`adb emu kill`, then start it again); that is an emulator quirk, not the app.
+
+Other things to try: `hang` (the app should abandon the request after ~30 s of no progress and retry), `reject400` (the report should stop at "Needs attention" and *not* retry), a sixth photo (blocked at the picker), zero photos or a blank description (Save stays disabled).
 
 ## How delivery works
 
