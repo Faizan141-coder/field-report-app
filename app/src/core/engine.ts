@@ -175,7 +175,9 @@ export class UploadEngine {
       .finally(() => {
         this.running = false;
         // A report enqueued while the loop was winding down must not be stranded.
-        if (this.nextDue() !== undefined) this.kick();
+        // Offline is excluded on purpose: the loop exits immediately when offline, so
+        // re-kicking here would spin forever. nudge() restarts us on reconnect.
+        if (this.deps.isOnline() && this.nextDue() !== undefined) this.kick();
       });
   }
 
