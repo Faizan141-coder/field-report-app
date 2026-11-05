@@ -5,6 +5,7 @@ import {SERVER_URL} from '../native/config';
 import {fileStore} from '../native/fileStore';
 import {createHttpApi} from '../native/httpApi';
 import {imagePreparer} from '../native/imagePreparer';
+import {keepAliveWhilePending} from '../native/keepAlive';
 import {isOnline, onConnectivityChange} from '../native/network';
 
 export const engine = new UploadEngine({
@@ -21,8 +22,15 @@ let started: Promise<void> | null = null;
 export function startEngine(): Promise<void> {
   started ??= (async () => {
     await engine.init();
+    keepAliveWhilePending(engine);
     onConnectivityChange(online => online && engine.nudge());
     AppState.addEventListener('change', s => s === 'active' && engine.nudge());
   })();
   return started;
+}
+
+/** For the headless keep-alive task: the engine, once its queue has been loaded from disk. */
+export async function getStartedEngine() {
+  await startEngine();
+  return engine;
 }
