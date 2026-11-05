@@ -55,7 +55,7 @@ What differs from Android: there is **no background service on iOS**, so uploads
 
 Release builds of the app talk to `https://field-report-server.onrender.com`; debug builds still use
 `localhost:4000` (see `app/src/native/config.ts`). The server is deployed from `render.yaml`
-(Render, Docker, free plan): New -> Blueprint -> pick this repo.
+(Render needs a card). Without a card, the same `server/` folder runs as a free Hugging Face Docker Space: create a Space with SDK Docker, then push the contents of `server/` to it (its `README.md` front-matter sets `app_port: 4000`). The URL is `https://<user>-<space>.hf.space`.
 
 - The free plan sleeps after ~15 min idle (first request ~30 s; the app just retries) and its disk
   is wiped on restart/redeploy, so uploaded reports are not durable. Fine for a demo.
