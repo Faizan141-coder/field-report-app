@@ -121,34 +121,56 @@ Originals (an 18 MB camera file is fine) are decoded, scaled and re-encoded **na
 - **One JSON file per report**, atomic write (tmp → unlink → move; a crash in the gap is repaired on load). Chosen over SQLite: a handful of small records, no native dependency, and one corrupt file can't take others down.
 - **Own backend** rather than S3/Firebase, because resumable chunks, a commit step that refuses incomplete reports, and fault injection were easier to get right than to bolt onto a vendor SDK.
 
+## Background uploads (Android)
+
+A backgrounded Android app is frozen within seconds, and React Native additionally **pauses every JS timer** when the activity pauses. `fetch` settles through `setTimeout`, so without help an in-flight request hangs until the app is foregrounded (I reproduced exactly that on an emulator). While any report is queued or uploading, the app therefore runs a **foreground service** (`UploadForegroundService`, a `HeadlessJsTaskService`): the notification keeps the process alive, and the open headless task keeps the timers ticking. The engine itself knows nothing about this; `app/src/native/keepAlive.ts` just watches its snapshots and starts or stops the service. When nothing is pending the task ends, the service stops itself and the notification disappears.
+
+- Android 13+ asks for the notification permission the first time work is pending. **If it is denied the service still runs** (only its notification is hidden).
+- Force-stopping the app from Settings kills the service too; the next launch resumes from disk.
+- Not implemented: iOS background transfers.
+
 ## What has been verified, and how
 
-| claim | evidence |
+Headless (`npm run headless`, real engine, real server, MD5 of every image): exactly-once, byte-identical delivery through lost acks, dropped sockets, mid-body drops, 500s, hangs and a simulated force-quit; offline holds and reconnect delivers; a 400 is not retried.
+
+By hand on an Android 15 arm64 emulator with a **release** build (`adb root` was used to inspect the app's private files and the server's data directory afterwards):
+
+| scenario | result |
 |---|---|
-| exactly-once, byte-identical delivery through lost acks, dropped sockets, mid-body drops, 500s, hangs and a simulated force-quit | `npm run headless` (real engine, real server, MD5 of every image) |
-| offline holds, reconnect delivers; a 400 is not retried | `npm run headless` |
-| a report composed offline with 5 photos (one 18.3 MB original) survives force-quit, reinstall and two emulator reboots, then uploads unattended exactly once | run by hand on an Android 15 arm64 emulator, **release** build. The server held 5 valid 2048×1536 JPEGs of ~1.4 MB each |
-| nothing says "Uploaded" before the server commits | wording lives in one pure function, `app/src/ui/status.ts` |
+| blank / whitespace-only description, zero photos | Save stays disabled with a hint; the description is trimmed |
+| sixth photo | blocked: both photo buttons disable with an explanation; the picker is limited to the free slots |
+| 3 reports (1, 3 and 5 photos) composed in airplane/no-data mode, force-quit, reopened | all three still "Saved on this device"; originals and one JSON file per report on disk; nothing on the server |
+| connectivity returns with the link dropping mid-chunk twice (+400 ms/slice) | 3 reports on the server exactly once, 9 valid images; request count = expected slices + exactly the 2 retries |
+| force-quit **three times mid-upload** (18.3 MB original in the set) | the server kept `.part` files at 1088 KB, then 256 KB, then 128 KB; each relaunch resumed from the server's offset; final state: each report once, every image valid, none over the cap, no `.part` left. The 18.3 MB original arrived as ~1.4 MB |
+| server returns 400 | "Needs attention" after exactly one request, no retries in the next 20 s; *Try again* with the fault still on fails once more; after clearing it the report uploads |
+| server hangs on a write | the stall watchdog abandoned it after ~30 s and the retry succeeded |
+| 503 + `Retry-After: 2` three times | retries at +2.1 s, +3.0 s, +4.2 s, then success |
+| connectivity cut mid-pass with two reports queued | the second report was not started while offline; both delivered after reconnect |
+| *On the server* tab | real thumbnails fetched from the server, byte totals; with the server down: "Couldn't reach the server" and a note that saved reports are still on the device |
+| Reset | *Cancel* changes nothing; confirming leaves zero files in app storage and the server untouched (11 reports before and after) |
+| camera (emulator virtual camera) | photo arrives upright (orientation baked into pixels); backing out of the camera returns to compose with the draft intact |
+| app backgrounded (on the launcher) while uploading | the whole report uploaded and committed in the background; the service and its notification then went away |
+| force-quit mid-upload with the service running | no crash, no lingering service; relaunch resumed and finished exactly once |
 
 ## Not done / known gaps
 
 Said plainly, in rough order of how much I'd worry:
 
-- **No background execution on Android.** Uploads run while the app process is alive. If the OS freezes or kills a backgrounded app, nothing uploads until it is opened again (it then resumes where it stopped; nothing is lost, but nothing is delivered either). The real fix is a foreground service or WorkManager job; I did not add one because it needs native code and a notification permission flow I couldn't test properly in the time.
-- **On-device fault runs are thin.** The fault matrix above was exercised headlessly, not by hand on the emulator with a throttled link and repeated force-quits mid-chunk. The emulator on my machine was too slow to do that reliably (it stalled for minutes at a time under load). The engine code path is identical, but the adapters (`httpApi.ts`, `fileStore.ts`) were only exercised by the one end-to-end run above.
-- **Permission-refusal and "sixth photo / zero photos / blank description" flows** are implemented (see `ComposeScreen.tsx`) but I only observed the zero-photo and blank-description gating on the device. The permission notice was not triggered: Android's system camera/photo-picker intents need no runtime permission, so it cannot be refused there. The camera path itself was not exercised (the emulator's virtual camera scene was not driven).
-- **A report in progress while composing is not persisted.** Force-quit before pressing Save and the draft is gone. Saved reports are safe; unsaved drafts are not.
-- **"Uploading 0 of 5" covers the preparing step too.** Resizing a large original takes a moment and the UI doesn't distinguish it from sending.
-- **Thumbnails of uploaded reports.** The local row shows a placeholder once the report is uploaded (the local files are deleted after commit); the *On the server* tab shows the real images fetched from the server.
-- **Dev transport only.** The app talks plain HTTP to `localhost` over `adb reverse`; the network security config allows cleartext to `localhost`, `127.0.0.1` and `10.0.2.2` only. A real deployment needs HTTPS and an authenticated backend. There is no login by design.
-- **Timing of the stall watchdog (30 s) and chunk size (64 KB) are educated guesses**, not tuned against a real 2G link.
+- **Not run on a physical device or a real 2G link.** The emulator reaches the server through `adb reverse`, which bypasses the emulated network, so link speed is simulated server-side (`latencyMs`) and failures are injected rather than physical. Chunk size (64 KB) and the stall timeout (30 s) are educated guesses.
+- **Notification-permission and Doze behaviour** beyond the cases above (OEM battery optimisers, Android 14's six-hour `dataSync` limit) are untested.
+- **Camera / photo "permission refused, granted later from Settings"** could not be exercised on Android: the system camera and photo-picker intents need no runtime permission, so there is nothing to refuse. The code re-asks on every press and shows an *Open Settings* notice if the OS reports `permission` (this is the iOS case, which I never built).
+- **A draft in progress is not persisted.** Force-quit before pressing Save and the draft is gone; saved reports are safe.
+- **"Uploading 0 of 5" covers the preparing step too**; resizing a large original takes a moment and the UI doesn't distinguish it from sending.
+- **Thumbnails of uploaded reports** are placeholders locally (local files are deleted after commit); the *On the server* tab shows the real images.
+- **The Reset link sits at the bottom of the list**, so with many reports it is a scroll away. Deliberate for a destructive action, but easy to miss.
+- **Dev transport only.** Plain HTTP to `localhost` over `adb reverse`; the network security config permits cleartext to `localhost`, `127.0.0.1` and `10.0.2.2` only. A real deployment needs HTTPS and an authenticated backend (no login by design here).
 - **iOS:** the project exists and usage strings are set, but it was never built or run.
 - **No unit-test suite** beyond the headless scenarios; I preferred verifying the delivery guarantees end to end.
 
 ## With another day
 
-1. Android foreground service / WorkManager so uploads continue with the app backgrounded.
-2. Persist the compose draft.
+1. Persist the compose draft; WorkManager as a second line of defence if the OS kills the process.
+2. iOS background transfers (`URLSession` background configuration).
 3. A distinct "Preparing photos" state and per-image progress.
 4. Hand-run the full fault matrix on a physical device on a throttled network; tune chunk size and stall timeout from real numbers.
 5. Content-hash the images so the server can detect a corrupted chunk, not just a missing one.
