@@ -51,7 +51,19 @@ For kill / airplane-mode tests use a build that doesn't need Metro: *Product →
 
 What differs from Android: there is **no background service on iOS**, so uploads pause roughly 30 seconds after the app is backgrounded and resume when it is reopened (nothing is lost); and the camera and photo permission prompts are real, so you can deny them and exercise the *Open Settings* path (grant it in Settings and come back; no restart needed).
 
-### Headless (no UI, no device)
+### Hosted backend (no cable needed)
+
+Release builds of the app talk to `https://field-report-server.onrender.com`; debug builds still use
+`localhost:4000` (see `app/src/native/config.ts`). The server is deployed from `render.yaml`
+(Render, Docker, free plan): New -> Blueprint -> pick this repo.
+
+- The free plan sleeps after ~15 min idle (first request ~30 s; the app just retries) and its disk
+  is wiped on restart/redeploy, so uploaded reports are not durable. Fine for a demo.
+- Fault injection against the hosted server:
+  `curl -X POST https://field-report-server.onrender.com/admin/faults -H 'content-type: application/json' -d '{"mode":"dropMidBody","times":6,"dropAfterBytes":20000}'`
+  (clear with `curl -X DELETE .../admin/faults`; inspect with `curl .../reports`).
+
+## Headless (no UI, no device)
 
 The upload engine runs in plain Node against the real server. It checksums every byte end to end:
 
