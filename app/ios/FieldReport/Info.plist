@@ -4,6 +4,8 @@
 <dict>
 	<key>NSCameraUsageDescription</key>
 	<string>Take photos to attach to field reports.</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Connect to the report server on your local network (development).</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>Choose photos to attach to field reports.</string>
 	<key>CADisableMinimumFrameDurationOnPhone</key>

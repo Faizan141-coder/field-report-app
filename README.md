@@ -25,6 +25,32 @@ npx react-native run-android --mode release
 
 The server URL is one constant: `app/src/native/config.ts`.
 
+### Run on an iPhone (not yet verified by me)
+
+The iOS project is set up but **I have not been able to build it** (the machine I developed on has no Xcode), so treat this as a best-effort recipe. It needs a Mac with Xcode and an iPhone on the **same Wi-Fi** as the Mac.
+
+```bash
+# 1. Xcode from the App Store, opened once; then:
+sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
+sudo xcodebuild -runFirstLaunch
+
+# 2. dependencies
+cd app && npm install
+cd ios && pod install        # or: bundle install && bundle exec pod install
+
+# 3. point the app at your Mac: edit IOS_SERVER_HOST in app/src/native/config.ts to
+echo "$(scutil --get LocalHostName).local"      # e.g. Faizans-MacBook-Air.local (don't commit it)
+
+# 4. backend, listening on all interfaces (it already does)
+cd ../../server && npm install && npm start
+```
+
+Then in Xcode: open `app/ios/FieldReport.xcworkspace` → target *FieldReport* → *Signing & Capabilities* → pick your **Team** (a free Apple ID "Personal Team" works) and change the **Bundle Identifier** to something unique (e.g. `com.yourname.fieldreport`). Plug in the iPhone, unlock it, tap *Trust*, and enable *Settings → Privacy & Security → Developer Mode* (it restarts). Pick the phone as the run destination.
+
+For kill / airplane-mode tests use a build that doesn't need Metro: *Product → Scheme → Edit Scheme… → Run → Build Configuration: **Release***, then ⌘R. First launch: *Settings → General → VPN & Device Management* → trust your developer profile, then allow the **Local Network** prompt in the app (without it the phone can't reach the Mac). A free-account build expires after 7 days.
+
+What differs from Android: there is **no background service on iOS**, so uploads pause roughly 30 seconds after the app is backgrounded and resume when it is reopened (nothing is lost); and the camera and photo permission prompts are real, so you can deny them and exercise the *Open Settings* path (grant it in Settings and come back; no restart needed).
+
 ### Headless (no UI, no device)
 
 The upload engine runs in plain Node against the real server. It checksums every byte end to end:
@@ -164,7 +190,7 @@ Said plainly, in rough order of how much I'd worry:
 - **Thumbnails of uploaded reports** are placeholders locally (local files are deleted after commit); the *On the server* tab shows the real images.
 - **The Reset link sits at the bottom of the list**, so with many reports it is a scroll away. Deliberate for a destructive action, but easy to miss.
 - **Dev transport only.** Plain HTTP to `localhost` over `adb reverse`; the network security config permits cleartext to `localhost`, `127.0.0.1` and `10.0.2.2` only. A real deployment needs HTTPS and an authenticated backend (no login by design here).
-- **iOS:** the project exists and usage strings are set, but it was never built or run.
+- **iOS:** the project exists, the usage strings and local-network access are configured and there is a recipe above, but I never built or run it (no Xcode on my machine). The Android foreground service has no iOS counterpart.
 - **No unit-test suite** beyond the headless scenarios; I preferred verifying the delivery guarantees end to end.
 
 ## With another day
