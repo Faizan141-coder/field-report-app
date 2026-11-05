@@ -3,7 +3,7 @@ import {Pressable, StyleSheet, Text, View} from 'react-native';
 import {Summary} from '../status';
 import {colors, HIT, toneColors} from '../theme';
 
-export function StatusBanner({summary, onRetryNow}: {summary: Summary; onRetryNow?: () => void}) {
+export function StatusBanner({summary, actionLabel, onAction}: {summary: Summary; actionLabel?: string; onAction?: () => void}) {
   const c = toneColors[summary.tone];
   return (
     <View
@@ -15,9 +15,9 @@ export function StatusBanner({summary, onRetryNow}: {summary: Summary; onRetryNo
         <Text style={[styles.title, {color: c.fg}]}>{summary.title}</Text>
         <Text style={styles.detail}>{summary.detail}</Text>
       </View>
-      {onRetryNow ? (
-        <Pressable accessibilityRole="button" onPress={onRetryNow} style={[styles.btn, {borderColor: c.fg}]}>
-          <Text style={[styles.btnText, {color: c.fg}]}>Retry now</Text>
+      {onAction ? (
+        <Pressable accessibilityRole="button" onPress={onAction} style={[styles.btn, {borderColor: c.fg}]}>
+          <Text style={[styles.btnText, {color: c.fg}]}>{actionLabel ?? 'Retry now'}</Text>
         </Pressable>
       ) : null}
     </View>

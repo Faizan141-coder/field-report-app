@@ -54,7 +54,7 @@ export function ServerList({reloadKey}: {reloadKey: number}) {
       renderItem={({item}) => (
         <View style={styles.card}>
           <Text style={styles.desc}>{item.description}</Text>
-          <Text style={styles.muted}>
+          <Text style={styles.meta}>
             {item.images.length} photo{item.images.length > 1 ? 's' : ''} · {mb(item.images.reduce((a, i) => a + i.bytes, 0))} · received {new Date(item.receivedAt).toLocaleString()}
           </Text>
           <View style={styles.thumbs}>
@@ -71,6 +71,7 @@ const styles = StyleSheet.create({
   center: {padding: 32, alignItems: 'center', gap: 10},
   title: {fontSize: 16, fontWeight: '700', color: colors.text, textAlign: 'center'},
   muted: {fontSize: 13, color: colors.muted, textAlign: 'center'},
+  meta: {fontSize: 13, color: colors.muted},
   btn: {minHeight: HIT, paddingHorizontal: 24, borderRadius: 10, borderWidth: 1, borderColor: colors.primary, justifyContent: 'center'},
   btnText: {color: colors.primary, fontWeight: '600'},
   card: {backgroundColor: colors.card, borderRadius: 12, padding: 12, marginBottom: 10, borderWidth: 1, borderColor: colors.line, gap: 6},

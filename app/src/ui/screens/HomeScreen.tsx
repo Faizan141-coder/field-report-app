@@ -19,8 +19,17 @@ export function HomeScreen({navigation}: {navigation: {navigate: (s: 'Compose') 
   const [tab, setTab] = useState<Tab>('device');
   const [serverKey, setServerKey] = useState(0);
   const summary = summarize(reports, online);
-  const hasPending = reports.some(r => r.phase !== 'uploaded');
   const unsent = reports.filter(r => r.phase !== 'uploaded').length;
+  const attention = reports.filter(r => r.phase === 'needsAttention');
+  // "Retry now" only means something for reports that are waiting; stopped ones need "Try again".
+  const waiting = reports.some(r => r.phase === 'queued' || r.phase === 'uploading');
+
+  // A newly saved report should be visible straight away, whichever tab the user was on.
+  const lastUnsent = useRef(unsent);
+  useEffect(() => {
+    if (unsent > lastUnsent.current) setTab('device');
+    lastUnsent.current = unsent;
+  }, [unsent]);
 
   // Reload the server list whenever something new lands on it.
   const committed = reports.filter(r => r.phase === 'uploaded').length;
@@ -46,7 +55,17 @@ export function HomeScreen({navigation}: {navigation: {navigate: (s: 'Compose') 
   return (
     <View style={styles.flex}>
       <View style={styles.top}>
-        <StatusBanner summary={summary} onRetryNow={hasPending && online ? () => engine.nudge() : undefined} />
+        <StatusBanner
+          summary={summary}
+          actionLabel={attention.length ? 'Try again' : 'Retry now'}
+          onAction={
+            attention.length
+              ? () => attention.forEach(r => engine.retry(r.id))
+              : waiting && online
+              ? () => engine.nudge()
+              : undefined
+          }
+        />
         <View style={styles.seg}>
           {(['device', 'server'] as Tab[]).map(t => (
             <Pressable key={t} accessibilityRole="tab" accessibilityState={{selected: tab === t}} onPress={() => setTab(t)} style={[styles.segBtn, tab === t && styles.segOn]}>

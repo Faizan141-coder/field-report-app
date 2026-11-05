@@ -25,16 +25,16 @@ export class ValidationError extends Error {
 }
 
 export function classifyStatus(status: number, body?: unknown, retryAfterMs?: number): UploadError {
-  const msg = `Server responded ${status}`;
-  if (status === 413) return new UploadError('tooLarge', msg, {status});
+  const msg = `The server refused this report (error ${status})`;
+  if (status === 413) return new UploadError('tooLarge', 'A photo is too large for the server', {status});
   if (status === 409 && Array.isArray((body as {missing?: unknown})?.missing)) {
-    return new UploadError('missingOnServer', msg, {
+    return new UploadError('missingOnServer', 'Server was missing photos', {
       status,
       missing: (body as {missing: number[]}).missing,
     });
   }
   if (status === 408 || status === 429 || status >= 500) {
-    return new UploadError('transient', msg, {status, retryAfterMs});
+    return new UploadError('transient', status === 503 || status === 429 ? 'Server is busy' : 'Server problem', {status, retryAfterMs});
   }
   return new UploadError('permanent', msg, {status});
 }

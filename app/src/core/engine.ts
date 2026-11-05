@@ -317,7 +317,7 @@ export class UploadEngine {
       e instanceof UploadError
         ? e
         : // fetch/blob-util network failures arrive as plain errors with no status
-          new UploadError('transient', e instanceof Error ? e.message : String(e));
+          new UploadError('transient', "Couldn't reach the server");
     const at = this.now();
 
     switch (err.kind) {
@@ -375,10 +375,14 @@ export class UploadEngine {
   }
 
   private async cleanupFiles(r: Report): Promise<void> {
+    const dirs = new Set<string>();
     for (const i of r.images) {
       for (const uri of [i.originalUri, i.preparedUri]) {
         if (uri) await this.deps.files.remove(uri).catch(() => {});
       }
+      // Each report's originals live in their own folder; don't leave empty ones behind.
+      dirs.add(i.originalUri.replace(/\/[^/]*$/, ''));
     }
+    for (const dir of dirs) await this.deps.files.remove(dir).catch(() => {});
   }
 }
