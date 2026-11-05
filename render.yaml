@@ -1,7 +1,0 @@
-services:
-  - type: web
-    name: field-report-server
-    runtime: docker
-    rootDir: server
-    plan: free
-    healthCheckPath: /health

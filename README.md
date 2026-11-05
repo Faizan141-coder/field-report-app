@@ -51,17 +51,20 @@ For kill / airplane-mode tests use a build that doesn't need Metro: *Product →
 
 What differs from Android: there is **no background service on iOS**, so uploads pause roughly 30 seconds after the app is backgrounded and resume when it is reopened (nothing is lost); and the camera and photo permission prompts are real, so you can deny them and exercise the *Open Settings* path (grant it in Settings and come back; no restart needed).
 
-### Hosted backend (no cable needed)
+### Hosted backend (Vercel, no cable needed)
 
-Release builds of the app talk to `https://field-report-server.onrender.com`; debug builds still use
-`localhost:4000` (see `app/src/native/config.ts`). The server is deployed from `render.yaml`
-(Render needs a card). Without a card, the same `server/` folder runs as a free Hugging Face Docker Space: create a Space with SDK Docker, then push the contents of `server/` to it (its `README.md` front-matter sets `app_port: 4000`). The URL is `https://<user>-<space>.hf.space`.
+Release builds talk to the URL in `app/src/native/config.ts` (`HOSTED_URL`); debug builds keep using
+`localhost:4000`. The same Express app (`server/src/app.ts`) runs on Vercel through `server/api/index.ts`.
+Vercel has no disk, so there `server/src/store.ts` keeps image chunks, reports and fault settings in
+Upstash Redis (connect one via the Vercel Marketplace; env vars `KV_REST_API_URL`/`KV_REST_API_TOKEN`).
+Locally, with no Redis vars set, it uses the `server/data` folder as before.
 
-- The free plan sleeps after ~15 min idle (first request ~30 s; the app just retries) and its disk
-  is wiped on restart/redeploy, so uploaded reports are not durable. Fine for a demo.
-- Fault injection against the hosted server:
-  `curl -X POST https://field-report-server.onrender.com/admin/faults -H 'content-type: application/json' -d '{"mode":"dropMidBody","times":6,"dropAfterBytes":20000}'`
-  (clear with `curl -X DELETE .../admin/faults`; inspect with `curl .../reports`).
+- Deploy: `cd server && vercel deploy --prod`.
+- Faults against the hosted server: `curl -X POST $URL/admin/faults -H 'content-type: application/json' -d '{"mode":"dropMidBody","times":6,"dropAfterBytes":20000}'`
+  (clear with `curl -X DELETE $URL/admin/faults`, inspect with `curl $URL/reports`).
+- On Vercel a "dropped socket" reaches the client as a 5xx/connection error rather than a raw reset;
+  the app handles both the same way (retry). Images and reports live in Redis, so the free plan's
+  size limits apply.
 
 ## Headless (no UI, no device)
 
