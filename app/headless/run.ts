@@ -11,6 +11,18 @@ import {UploadEngine} from '../src/core/engine';
 import {classifyStatus} from '../src/core/errors';
 import {Report, ReportApi, ReportStore} from '../src/core/types';
 
+// The server's `drop` / `dropMidBody` faults destroy sockets on purpose. Node's built-in fetch
+// occasionally reports the resulting ECONNRESET as an uncaught error on a connection nobody is
+// waiting on (the in-flight request itself rejects normally and is handled by the engine).
+// Tolerate exactly that, and nothing else, so the harness isn't flaky.
+process.on('uncaughtException', err => {
+  if ((err as NodeJS.ErrnoException).code === 'ECONNRESET') {
+    console.warn('(ignoring stray ECONNRESET from a deliberately destroyed socket)');
+    return;
+  }
+  throw err;
+});
+
 const BASE = process.env.SERVER ?? 'http://localhost:4100';
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'frs-'));
 const CHUNK = 16 * 1024;
