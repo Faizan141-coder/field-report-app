@@ -17,7 +17,7 @@ const IOS_SERVER_HOST = 'localhost';
  * Hosted backend (see README, "Hosted backend"). Release builds use it so the app works on any
  * phone with no cable; debug builds keep using the local dev server.
  */
-const HOSTED_URL = 'https://field-report-server.onrender.com';
+const HOSTED_URL = 'https://field-report-server.vercel.app';
 
 const DEV_URL = `http://${Platform.OS === 'ios' ? IOS_SERVER_HOST : 'localhost'}:4000`;
 

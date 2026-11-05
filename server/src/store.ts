@@ -120,17 +120,28 @@ export function redisStore(url: string, token: string): Store {
   const r = new Redis({url, token, automaticDeserialization: false});
   const key = (id: string, i: number) => `p:${id}:${i}`;
   const num = (v: unknown) => (v == null ? undefined : Number(v));
+  // With auto-deserialization off the client returns raw arrays: HMGET -> values in order,
+  // HGETALL -> flat [field, value, ...].
+  const meta = async (k: string) => {
+    const [off, done] = (await r.hmget(k, 'off', 'done')) as unknown as (string | null)[];
+    return {off: num(off), done: num(done)};
+  };
+  const all = async (k: string) => {
+    const flat = ((await r.hgetall(k)) ?? []) as unknown as string[];
+    const out: Record<string, string> = {};
+    for (let i = 0; i + 1 < flat.length; i += 2) out[flat[i]] = flat[i + 1];
+    return out;
+  };
   return {
     async imageStatus(id, i) {
-      const [off, done] = await r.hmget<Record<string, string>>(key(id, i), 'off', 'done').then(o => [num(o?.off), num(o?.done)]);
+      const {off, done} = await meta(key(id, i));
       return done !== undefined ? {complete: true, received: done} : {complete: false, received: off ?? 0};
     },
     async putChunk(id, i, start, total, body) {
       const k = key(id, i);
-      const o = await r.hmget<Record<string, string>>(k, 'off', 'done');
-      const done = num(o?.done);
+      const {off, done} = await meta(k);
       if (done === total) return {kind: 'ok', complete: true, received: total, alreadyComplete: true};
-      const h = num(o?.off) ?? 0;
+      const h = off ?? 0;
       if (start > h) return {kind: 'gap', offset: h};
       if (start < h) {
         // Re-sent chunk: drop everything from `start` on, then overwrite.
@@ -142,17 +153,17 @@ export function redisStore(url: string, token: string): Store {
       return {kind: 'ok', complete: now === total, received: now, alreadyComplete: false};
     },
     async readImage(id, i) {
-      const all = (await r.hgetall<Record<string, string>>(key(id, i))) ?? {};
-      if (all.done === undefined) return undefined;
+      const h = await all(key(id, i));
+      if (h.done === undefined) return undefined;
       return Buffer.concat(
-        Object.keys(all)
+        Object.keys(h)
           .filter(f => /^\d+$/.test(f))
           .sort((a, b) => Number(a) - Number(b))
-          .map(f => Buffer.from(all[f], 'base64')),
+          .map(f => Buffer.from(h[f], 'base64')),
       );
     },
     async imageSize(id, i) {
-      return num(await r.hget<string>(key(id, i), 'done'));
+      return (await meta(key(id, i))).done;
     },
     async hasReport(id) {
       return (await r.exists(`r:${id}`)) === 1;
